@@ -12,8 +12,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # preload model (để tránh runtime download)
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base', compute_type='int8')"
-
+RUN python -c "from faster_whisper import WhisperModel; print('loading model...'); WhisperModel('base', compute_type='int8')"
 COPY . .
 
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]

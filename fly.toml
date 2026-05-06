@@ -1,0 +1,8 @@
+[[services]]
+internal_port = 8080
+
+  [[services.ports]]
+  port = 80
+
+  [[services.ports]]
+  port = 443
