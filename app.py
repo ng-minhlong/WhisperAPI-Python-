@@ -1,27 +1,84 @@
-from fastapi import FastAPI, UploadFile, File
-from faster_whisper import WhisperModel
-import tempfile
+import asyncio
 import os
+import shutil
+import tempfile
+
+import imageio_ffmpeg
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from faster_whisper import WhisperModel
+
+# Make ffmpeg available without system install
+ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+ffmpeg_dir = os.path.dirname(ffmpeg_exe)
+os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
 
 app = FastAPI()
 
-# dùng tiny để tránh crash free tier
-MODEL_SIZE = os.getenv("MODEL_SIZE", "tiny")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-print(f"Loading model: {MODEL_SIZE}")
+MODEL_SIZE = os.getenv("MODEL_SIZE", "tiny")   # tiny để free tier đỡ chết
+LANGUAGE = os.getenv("LANGUAGE", "vi")         # đổi sang "" nếu muốn auto-detect
+MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT", "1"))
+
 model = WhisperModel(MODEL_SIZE, compute_type="int8")
+semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+
 
 @app.get("/")
 def root():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "model": MODEL_SIZE,
+        "language": LANGUAGE,
+    }
+
 
 @app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)):
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
+    tmp_path = None
 
-    segments, _ = model.transcribe(tmp_path)
+    try:
+        suffix = os.path.splitext(file.filename or "")[1] or ".webm"
 
-    text = " ".join([seg.text for seg in segments])
-    return {"text": text}
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+          shutil.copyfileobj(file.file, tmp)
+          tmp_path = tmp.name
+
+        async with semaphore:
+            segments, info = model.transcribe(
+                tmp_path,
+                language=LANGUAGE if LANGUAGE else None,
+                vad_filter=True,
+                beam_size=1,
+                condition_on_previous_text=False,
+                temperature=0.0,
+            )
+
+            text = " ".join(seg.text.strip() for seg in segments).strip()
+
+        return {
+            "text": text,
+            "language": info.language,
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        try:
+            await file.close()
+        except Exception:
+            pass
+
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass

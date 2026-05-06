@@ -1,4 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 faster-whisper
 python-multipart
+imageio-ffmpeg
