@@ -1,10 +1,19 @@
 from fastapi import FastAPI, UploadFile, File
 from faster_whisper import WhisperModel
 import tempfile
+import os
 
 app = FastAPI()
 
-model = WhisperModel("base", compute_type="int8")  # nhẹ + CPU ok
+# dùng tiny để tránh crash free tier
+MODEL_SIZE = os.getenv("MODEL_SIZE", "tiny")
+
+print(f"Loading model: {MODEL_SIZE}")
+model = WhisperModel(MODEL_SIZE, compute_type="int8")
+
+@app.get("/")
+def root():
+    return {"status": "ok"}
 
 @app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)):
